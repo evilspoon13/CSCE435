@@ -68,7 +68,21 @@ if (numtasks < 2 ) {
   }
 numworkers = numtasks-1;
 
+// create a communicator that excludes the master process
+MPI_Comm worker_comm;
+int color;
+
+if(taskid == MASTER){
+   color = MPI_UNDEFINED;
+}
+else{
+   color = 0;
+}
+
+MPI_Comm_split(MPI_COMM_WORLD, color, taskid, &worker_comm);
+
 // WHOLE PROGRAM COMPUTATION PART STARTS HERE
+double whole_computation_start = MPI_Wtime();
 
 /**************************** master task ************************************/
    if (taskid == MASTER)
@@ -88,10 +102,11 @@ numworkers = numtasks-1;
             b[i][j]= i*j;
       
       //INITIALIZATION PART FOR THE MASTER PROCESS ENDS HERE
-      
+      master_initialization_time = MPI_Wtime() - master_init_start;
       
       //SEND-RECEIVE PART FOR THE MASTER PROCESS STARTS HERE
 
+      double master_send_receive_start = MPI_Wtime();
       /* Send matrix data to the worker tasks */
       averow = sizeOfMatrix/numworkers;
       extra = sizeOfMatrix%numworkers;
@@ -120,6 +135,8 @@ numworkers = numtasks-1;
                   MPI_COMM_WORLD, &status);
          printf("Received results from task %d\n",source);
       }
+
+      master_send_receive_time = MPI_Wtime() - master_send_receive_start;
       
       //SEND-RECEIVE PART FOR THE MASTER PROCESS ENDS HERE
 
@@ -144,6 +161,7 @@ numworkers = numtasks-1;
    {
       //RECEIVING PART FOR WORKER PROCESS STARTS HERE
 
+      // start time of worker process
       double worker_receive_start = MPI_Wtime();
 
       mtype = FROM_MASTER;
@@ -154,11 +172,14 @@ numworkers = numtasks-1;
       
       //RECEIVING PART FOR WORKER PROCESS ENDS HERE
       
+      // end time of worker process
       worker_receive_time = MPI_Wtime() - worker_receive_start;
 
       //CALCULATION PART FOR WORKER PROCESS STARTS HERE
 
-      
+      // start time of worker calculation process
+      double worker_calculation_start = MPI_Wtime();
+
       for (k=0; k<sizeOfMatrix; k++)
          for (i=0; i<rows; i++)
          {
@@ -169,18 +190,27 @@ numworkers = numtasks-1;
 
       //CALCULATION PART FOR WORKER PROCESS ENDS HERE
       
+      // end time of worker calculationprocess
+      worker_calculation_time = MPI_Wtime() - worker_calculation_start;
       
       //SENDING PART FOR WORKER PROCESS STARTS HERE
+
+      // start time of worker sending process
+      double worker_send_start = MPI_Wtime();
 
       mtype = FROM_WORKER;
       MPI_Send(&offset, 1, MPI_INT, MASTER, mtype, MPI_COMM_WORLD);
       MPI_Send(&rows, 1, MPI_INT, MASTER, mtype, MPI_COMM_WORLD);
       MPI_Send(&c, rows*sizeOfMatrix, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD);
 
+      // end time of worker sending process
+      worker_send_time = MPI_Wtime() - worker_send_start;
+      
       //SENDING PART FOR WORKER PROCESS ENDS HERE
    }
 
    // WHOLE PROGRAM COMPUTATION PART ENDS HERE
+   whole_computation_time = MPI_Wtime() - whole_computation_start;
 
    adiak::init(NULL);
    adiak::user();
@@ -209,11 +239,44 @@ numworkers = numtasks-1;
    /* USE MPI_Reduce here to calculate the minimum, maximum and the average times for the worker processes.
    MPI_Reduce (&sendbuf,&recvbuf,count,datatype,op,root,comm). https://hpc-tutorials.llnl.gov/mpi/collective_communication_routines/ */
 
-   MPI_Reduce()
+   // Only workers participate in MPI_Reduce using worker_comm
+   if (taskid > MASTER) {
+      MPI_Reduce(&worker_receive_time, &worker_receive_time_max, 1, MPI_DOUBLE, MPI_MAX, 0, worker_comm);
+      MPI_Reduce(&worker_receive_time, &worker_receive_time_min, 1, MPI_DOUBLE, MPI_MIN, 0, worker_comm);
+      MPI_Reduce(&worker_receive_time, &worker_receive_time_sum, 1, MPI_DOUBLE, MPI_SUM, 0, worker_comm);
+
+      MPI_Reduce(&worker_calculation_time, &worker_calculation_time_max, 1, MPI_DOUBLE, MPI_MAX, 0, worker_comm);
+      MPI_Reduce(&worker_calculation_time, &worker_calculation_time_min, 1, MPI_DOUBLE, MPI_MIN, 0, worker_comm);
+      MPI_Reduce(&worker_calculation_time, &worker_calculation_time_sum, 1, MPI_DOUBLE, MPI_SUM, 0, worker_comm);
+
+      MPI_Reduce(&worker_send_time, &worker_send_time_max, 1, MPI_DOUBLE, MPI_MAX, 0, worker_comm);
+      MPI_Reduce(&worker_send_time, &worker_send_time_min, 1, MPI_DOUBLE, MPI_MIN, 0, worker_comm);
+      MPI_Reduce(&worker_send_time, &worker_send_time_sum, 1, MPI_DOUBLE, MPI_SUM, 0, worker_comm);
+   }
 
    
    if (taskid == 0)
    {
+
+      // get results from worker 1 (rank 0 in worker_comm) via MPI_Send/Recv
+      if (numworkers > 0) {
+         MPI_Recv(&worker_receive_time_max, 1, MPI_DOUBLE, 1, FROM_WORKER, MPI_COMM_WORLD, &status);
+         MPI_Recv(&worker_receive_time_min, 1, MPI_DOUBLE, 1, FROM_WORKER, MPI_COMM_WORLD, &status);
+         MPI_Recv(&worker_receive_time_sum, 1, MPI_DOUBLE, 1, FROM_WORKER, MPI_COMM_WORLD, &status);
+         MPI_Recv(&worker_calculation_time_max, 1, MPI_DOUBLE, 1, FROM_WORKER, MPI_COMM_WORLD, &status);
+         MPI_Recv(&worker_calculation_time_min, 1, MPI_DOUBLE, 1, FROM_WORKER, MPI_COMM_WORLD, &status);
+         MPI_Recv(&worker_calculation_time_sum, 1, MPI_DOUBLE, 1, FROM_WORKER, MPI_COMM_WORLD, &status);
+         MPI_Recv(&worker_send_time_max, 1, MPI_DOUBLE, 1, FROM_WORKER, MPI_COMM_WORLD, &status);
+         MPI_Recv(&worker_send_time_min, 1, MPI_DOUBLE, 1, FROM_WORKER, MPI_COMM_WORLD, &status);
+         MPI_Recv(&worker_send_time_sum, 1, MPI_DOUBLE, 1, FROM_WORKER, MPI_COMM_WORLD, &status);
+      }
+      
+      // Calculate averages (no need to subtract 1e9 since master wasn't included)
+      worker_recieve_time_average = worker_receive_time_sum / numworkers;
+      worker_calculation_time_average = worker_calculation_time_sum / numworkers;
+      worker_send_time_average = worker_send_time_sum / numworkers;
+
+
       // Master Times
       printf("******************************************************\n");
       printf("Master Times:\n");
@@ -227,37 +290,7 @@ numworkers = numtasks-1;
       adiak::value("MPI_Reduce-master_initialization_time", master_initialization_time);
       adiak::value("MPI_Reduce-master_send_receive_time", master_send_receive_time);
 
-      // Must move values to master for adiak
-      mtype = FROM_WORKER;
-      MPI_Recv(&worker_receive_time_max, 1, MPI_DOUBLE, 1, mtype, MPI_COMM_WORLD, &status);
-      MPI_Recv(&worker_receive_time_min, 1, MPI_DOUBLE, 1, mtype, MPI_COMM_WORLD, &status);
-      MPI_Recv(&worker_recieve_time_average, 1, MPI_DOUBLE, 1, mtype, MPI_COMM_WORLD, &status);
-      MPI_Recv(&worker_calculation_time_max, 1, MPI_DOUBLE, 1, mtype, MPI_COMM_WORLD, &status);
-      MPI_Recv(&worker_calculation_time_min, 1, MPI_DOUBLE, 1, mtype, MPI_COMM_WORLD, &status);
-      MPI_Recv(&worker_calculation_time_average, 1, MPI_DOUBLE, 1, mtype, MPI_COMM_WORLD, &status);
-      MPI_Recv(&worker_send_time_max, 1, MPI_DOUBLE, 1, mtype, MPI_COMM_WORLD, &status);
-      MPI_Recv(&worker_send_time_min, 1, MPI_DOUBLE, 1, mtype, MPI_COMM_WORLD, &status);
-      MPI_Recv(&worker_send_time_average, 1, MPI_DOUBLE, 1, mtype, MPI_COMM_WORLD, &status);
-
-      adiak::value("MPI_Reduce-worker_receive_time_max", worker_receive_time_max);
-      adiak::value("MPI_Reduce-worker_receive_time_min", worker_receive_time_min);
-      adiak::value("MPI_Reduce-worker_recieve_time_average", worker_recieve_time_average);
-      adiak::value("MPI_Reduce-worker_calculation_time_max", worker_calculation_time_max);
-      adiak::value("MPI_Reduce-worker_calculation_time_min", worker_calculation_time_min);
-      adiak::value("MPI_Reduce-worker_calculation_time_average", worker_calculation_time_average);
-      adiak::value("MPI_Reduce-worker_send_time_max", worker_send_time_max);
-      adiak::value("MPI_Reduce-worker_send_time_min", worker_send_time_min);
-      adiak::value("MPI_Reduce-worker_send_time_average", worker_send_time_average);
-   }
-   else if (taskid == 1)
-   { // Print only from the first worker.
-      // Print out worker time results.
-      
-      // Compute averages after MPI_Reduce
-      worker_recieve_time_average = worker_receive_time_sum / (double)numworkers;
-      worker_calculation_time_average = worker_calculation_time_sum / (double)numworkers;
-      worker_send_time_average = worker_send_time_sum / (double)numworkers;
-
+      // Print Worker Times (MPI_Reduce already calculated these)
       printf("******************************************************\n");
       printf("Worker Times:\n");
       printf("Worker Receive Time Max: %f \n", worker_receive_time_max);
@@ -271,16 +304,32 @@ numworkers = numtasks-1;
       printf("Worker Send Time Average: %f \n", worker_send_time_average);
       printf("\n******************************************************\n");
 
-      mtype = FROM_WORKER;
-      MPI_Send(&worker_receive_time_max, 1, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD);
-      MPI_Send(&worker_receive_time_min, 1, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD);
-      MPI_Send(&worker_recieve_time_average, 1, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD);
-      MPI_Send(&worker_calculation_time_max, 1, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD);
-      MPI_Send(&worker_calculation_time_min, 1, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD);
-      MPI_Send(&worker_calculation_time_average, 1, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD);
-      MPI_Send(&worker_send_time_max, 1, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD);
-      MPI_Send(&worker_send_time_min, 1, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD);
-      MPI_Send(&worker_send_time_average, 1, MPI_DOUBLE, MASTER, mtype, MPI_COMM_WORLD);
+      adiak::value("MPI_Reduce-worker_receive_time_max", worker_receive_time_max);
+      adiak::value("MPI_Reduce-worker_receive_time_min", worker_receive_time_min);
+      adiak::value("MPI_Reduce-worker_recieve_time_average", worker_recieve_time_average);
+      adiak::value("MPI_Reduce-worker_calculation_time_max", worker_calculation_time_max);
+      adiak::value("MPI_Reduce-worker_calculation_time_min", worker_calculation_time_min);
+      adiak::value("MPI_Reduce-worker_calculation_time_average", worker_calculation_time_average);
+      adiak::value("MPI_Reduce-worker_send_time_max", worker_send_time_max);
+      adiak::value("MPI_Reduce-worker_send_time_min", worker_send_time_min);
+      adiak::value("MPI_Reduce-worker_send_time_average", worker_send_time_average);
+   }
+   else if (taskid == 1) {
+      // worker 1 (rank 0 in worker_comm) sends results to master
+      MPI_Send(&worker_receive_time_max, 1, MPI_DOUBLE, MASTER, FROM_WORKER, MPI_COMM_WORLD);
+      MPI_Send(&worker_receive_time_min, 1, MPI_DOUBLE, MASTER, FROM_WORKER, MPI_COMM_WORLD);
+      MPI_Send(&worker_receive_time_sum, 1, MPI_DOUBLE, MASTER, FROM_WORKER, MPI_COMM_WORLD);
+      MPI_Send(&worker_calculation_time_max, 1, MPI_DOUBLE, MASTER, FROM_WORKER, MPI_COMM_WORLD);
+      MPI_Send(&worker_calculation_time_min, 1, MPI_DOUBLE, MASTER, FROM_WORKER, MPI_COMM_WORLD);
+      MPI_Send(&worker_calculation_time_sum, 1, MPI_DOUBLE, MASTER, FROM_WORKER, MPI_COMM_WORLD);
+      MPI_Send(&worker_send_time_max, 1, MPI_DOUBLE, MASTER, FROM_WORKER, MPI_COMM_WORLD);
+      MPI_Send(&worker_send_time_min, 1, MPI_DOUBLE, MASTER, FROM_WORKER, MPI_COMM_WORLD);
+      MPI_Send(&worker_send_time_sum, 1, MPI_DOUBLE, MASTER, FROM_WORKER, MPI_COMM_WORLD);
+   }
+
+   // clean up the worker communicator
+   if (worker_comm != MPI_COMM_NULL) {
+      MPI_Comm_free(&worker_comm);
    }
 
    MPI_Finalize();
