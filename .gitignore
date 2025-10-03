@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+*.egg-info/
+dist/
+build/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# Caliper files
+*.cali
+
+# Output files
+*.out
+*.log
+slurm-*.out
+
+# Build directories
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Compiled executables
+mpi_mm
+*.exe
+*.o
+*.a
+
+# Plot outputs
+*.png
+*.pdf
+*.jpg
+*.jpeg
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Grace cluster specific
+*.grace_job
+core.*
